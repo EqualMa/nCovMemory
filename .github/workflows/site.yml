@@ -1,0 +1,60 @@
+name: Publish Site CI
+
+on:
+  push:
+    branches:
+      - master
+      - publish
+
+jobs:
+  build-publish:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [12.x]
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          ref: publish
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: yarn install --frozen-lockfile
+      - name: build site
+        run: |
+          GIT_REMOTE_REPO="${PUBLISH_REPO:-"$GITHUB_REPOSITORY"}"
+          if [[ "$GIT_REMOTE_REPO" == *.github.io ]]
+          then
+            DEFAULT_CUSTOM_BASE='/'
+          else
+            DEFAULT_CUSTOM_BASE="/$(echo "$GIT_REMOTE_REPO" | cut -d'/' -f2)/"
+          fi
+          CUSTOM_BASE="${PUBLISH_URL_BASE:-"$DEFAULT_CUSTOM_BASE"}" yarn run docs:build
+        env:
+          PUBLISH_URL_BASE: ${{ secrets.PublishUrlBase }}
+          PUBLISH_REPO: ${{ secrets.PublishRepo }}
+      - name: publish site
+        env:
+          PUBLISH_USER: ${{ secrets.PublishUser }}
+          PUBLISH_EMAIL: ${{ secrets.PublishEmail }}
+          PUBLISH_BRANCH: ${{ secrets.PublishBranch }}
+          PUBLISH_REPO: ${{ secrets.PublishRepo }}
+          PUBLISH_TOKEN: ${{ secrets.PublishToken }}
+          CUR_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          GH_USEREMAIL="${GITHUB_ACTOR}@users.noreply.github.com"
+          GIT_EMAIL="${PUBLISH_EMAIL:-"$GH_USEREMAIL"}"
+          GIT_USER="${PUBLISH_USER:-"$GITHUB_ACTOR"}"
+          GIT_REMOTE_TOKEN="${PUBLISH_TOKEN:-"$CUR_GITHUB_TOKEN"}"
+          GIT_REMOTE_REPO="${PUBLISH_REPO:-"$GITHUB_REPOSITORY"}"
+          GIT_REMOTE="https://${GITHUB_ACTOR}:${GIT_REMOTE_TOKEN}@github.com/${GIT_REMOTE_REPO}.git"
+          cd docs/.vuepress/dist
+          git init
+          git add -A
+          git config user.email "$GIT_EMAIL"
+          git config user.name "$GIT_USER"
+          git commit -m 'deploy'
+          git push -f "$GIT_REMOTE" master:${PUBLISH_BRANCH:-gh-pages}
